@@ -12,15 +12,20 @@ from src.config import (
     COR_INOCENTE,
     COR_JOGADOR,
     COR_TEXTO,
+    COR_TIRO,
     FPS,
     INTERVALO_ROBOS,
     LARGURA_TELA,
+    PENALIDADE_INOCENTE,
+    PONTOS_HOSTIL,
     TAMANHO_JOGADOR,
     TAMANHO_ROBO,
     TITULO_JOGO,
     VELOCIDADE_JOGADOR,
+    VELOCIDADE_TIRO,
+    VIDAS_INICIAIS,
 )
-from src.funcoes import classificar_robo, limitar_valor
+from src.funcoes import calcular_pontos, classificar_robo, jogador_perdeu, limitar_valor
 
 
 def criar_jogador():
@@ -108,6 +113,70 @@ def movimentar_robos(robos, jogador, delta):
         robo["rect"].topleft = (round(robo["x"]), round(robo["y"]))
 
 
+def criar_tiro(jogador, destino):
+    """Cria um projétil na direção do clique do mouse."""
+    origem = pygame.Vector2(jogador.center)
+    direcao = pygame.Vector2(destino) - origem
+
+    if direcao.length_squared() == 0:
+        return None
+
+    direcao = direcao.normalize()
+    return {
+        "posicao": origem,
+        "velocidade": direcao * VELOCIDADE_TIRO,
+        "rect": pygame.Rect(origem.x - 4, origem.y - 4, 8, 8),
+    }
+
+
+def movimentar_tiros(tiros, delta):
+    """Move os tiros e remove aqueles que saíram da janela."""
+    area_tela = pygame.Rect(0, 0, LARGURA_TELA, ALTURA_TELA)
+
+    for tiro in tiros:
+        tiro["posicao"] += tiro["velocidade"] * delta
+        tiro["rect"].center = (
+            round(tiro["posicao"].x),
+            round(tiro["posicao"].y),
+        )
+
+    tiros[:] = [tiro for tiro in tiros if area_tela.colliderect(tiro["rect"])]
+
+
+def verificar_acertos(tiros, robos, pontos):
+    """Resolve colisões entre tiros e robôs e atualiza a pontuação."""
+    tiros_remover = set()
+    robos_remover = set()
+
+    for indice_tiro, tiro in enumerate(tiros):
+        for indice_robo, robo in enumerate(robos):
+            if indice_robo in robos_remover:
+                continue
+            if tiro["rect"].colliderect(robo["rect"]):
+                pontos = calcular_pontos(
+                    pontos,
+                    robo["tipo"],
+                    PONTOS_HOSTIL,
+                    PENALIDADE_INOCENTE,
+                )
+                tiros_remover.add(indice_tiro)
+                robos_remover.add(indice_robo)
+                break
+
+    tiros[:] = [tiro for indice, tiro in enumerate(tiros) if indice not in tiros_remover]
+    robos[:] = [robo for indice, robo in enumerate(robos) if indice not in robos_remover]
+    return pontos
+
+
+def verificar_dano(jogador, robos, vidas):
+    """Retira uma vida quando um robô hostil encosta no técnico."""
+    for robo in robos:
+        if robo["tipo"] == "hostil" and jogador.colliderect(robo["rect"]):
+            robos.remove(robo)
+            return vidas - 1
+    return vidas
+
+
 def desenhar_cenario(tela):
     """Desenha um chão industrial provisório para a fábrica."""
     tela.fill(COR_FUNDO)
@@ -143,6 +212,16 @@ def desenhar_robos(tela, robos, fonte):
         tela.blit(imagem, posicao)
 
 
+def desenhar_tiros(tela, tiros):
+    for tiro in tiros:
+        pygame.draw.circle(tela, COR_TIRO, tiro["rect"].center, 4)
+
+
+def desenhar_interface(tela, fonte, pontos, vidas):
+    texto = fonte.render(f"Pontos: {pontos}     Vidas: {vidas}", True, COR_TEXTO)
+    tela.blit(texto, (15, 15))
+
+
 def executar_jogo():
     """Cria a janela e mantém o loop principal do Pygame em execução."""
     pygame.init()
@@ -151,8 +230,12 @@ def executar_jogo():
     pygame.display.set_caption(TITULO_JOGO)
     relogio = pygame.time.Clock()
     fonte = pygame.font.Font(None, 18)
+    fonte_interface = pygame.font.Font(None, 28)
     jogador = criar_jogador()
     robos = []
+    tiros = []
+    pontos = 0
+    vidas = VIDAS_INICIAIS
     ultimo_robo = pygame.time.get_ticks()
     rodando = True
 
@@ -164,6 +247,10 @@ def executar_jogo():
                 rodando = False
             elif evento.type == pygame.KEYDOWN and evento.key == pygame.K_ESCAPE:
                 rodando = False
+            elif evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
+                tiro = criar_tiro(jogador, evento.pos)
+                if tiro is not None:
+                    tiros.append(tiro)
 
         teclas = pygame.key.get_pressed()
         movimentar_jogador(jogador, teclas, delta)
@@ -174,10 +261,18 @@ def executar_jogo():
             ultimo_robo = agora
 
         movimentar_robos(robos, jogador, delta)
+        movimentar_tiros(tiros, delta)
+        pontos = verificar_acertos(tiros, robos, pontos)
+        vidas = verificar_dano(jogador, robos, vidas)
+
+        if jogador_perdeu(vidas):
+            rodando = False
 
         desenhar_cenario(tela)
         desenhar_robos(tela, robos, fonte)
+        desenhar_tiros(tela, tiros)
         desenhar_jogador(tela, jogador)
+        desenhar_interface(tela, fonte_interface, pontos, vidas)
         pygame.display.flip()
 
     pygame.quit()
