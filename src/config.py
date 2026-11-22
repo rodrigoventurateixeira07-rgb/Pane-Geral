@@ -1,3 +1,8 @@
+from pathlib import Path
+
+
+PASTA_PROJETO = Path(__file__).resolve().parent.parent
+
 LARGURA_TELA = 960
 ALTURA_TELA = 640
 FPS = 60
@@ -23,3 +28,6 @@ VELOCIDADE_TIRO = 620
 VIDAS_INICIAIS = 3
 PONTOS_HOSTIL = 10
 PENALIDADE_INOCENTE = 10
+DURACAO_PARTIDA = 60
+
+CAMINHO_RECORDE = PASTA_PROJETO / "data" / "recorde.txt"
