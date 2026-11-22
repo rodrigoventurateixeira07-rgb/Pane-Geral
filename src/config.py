@@ -1,0 +1,7 @@
+LARGURA_TELA = 960
+ALTURA_TELA = 640
+FPS = 60
+TITULO_JOGO = "Pane Geral - Entrega Parcial"
+
+COR_FUNDO = (36, 40, 48)
+COR_GRADE = (43, 48, 57)
