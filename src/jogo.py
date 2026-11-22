@@ -4,6 +4,7 @@ import pygame
 
 from src.config import (
     ALTURA_TELA,
+    CAMINHO_RECORDE,
     CHANCE_ACERTO_IA,
     COR_ALERTA,
     COR_FUNDO,
@@ -13,6 +14,7 @@ from src.config import (
     COR_JOGADOR,
     COR_TEXTO,
     COR_TIRO,
+    DURACAO_PARTIDA,
     FPS,
     INTERVALO_ROBOS,
     LARGURA_TELA,
@@ -25,7 +27,14 @@ from src.config import (
     VELOCIDADE_TIRO,
     VIDAS_INICIAIS,
 )
-from src.funcoes import calcular_pontos, classificar_robo, jogador_perdeu, limitar_valor
+from src.dados import carregar_recorde, salvar_recorde
+from src.funcoes import (
+    calcular_pontos,
+    classificar_robo,
+    jogador_perdeu,
+    limitar_valor,
+    tempo_restante,
+)
 
 
 def criar_jogador():
@@ -217,9 +226,47 @@ def desenhar_tiros(tela, tiros):
         pygame.draw.circle(tela, COR_TIRO, tiro["rect"].center, 4)
 
 
-def desenhar_interface(tela, fonte, pontos, vidas):
-    texto = fonte.render(f"Pontos: {pontos}     Vidas: {vidas}", True, COR_TEXTO)
+def desenhar_interface(tela, fonte, pontos, vidas, restante, recorde):
+    texto = fonte.render(
+        f"Pontos: {pontos}     Vidas: {vidas}     Tempo: {int(restante + 0.99)}     Recorde: {recorde}",
+        True,
+        COR_TEXTO,
+    )
     tela.blit(texto, (15, 15))
+
+
+def desenhar_fim(tela, fonte_grande, fonte_normal, estado, pontos):
+    """Exibe o resultado da rodada e a opção de reiniciar."""
+    camada = pygame.Surface((LARGURA_TELA, ALTURA_TELA), pygame.SRCALPHA)
+    camada.fill((0, 0, 0, 190))
+    tela.blit(camada, (0, 0))
+
+    titulo = "TURNO CONCLUIDO" if estado == "vitoria" else "PANE TOTAL"
+    cor_titulo = COR_INOCENTE if estado == "vitoria" else COR_HOSTIL
+
+    imagem_titulo = fonte_grande.render(titulo, True, cor_titulo)
+    tela.blit(imagem_titulo, imagem_titulo.get_rect(center=(LARGURA_TELA // 2, 240)))
+
+    resumo = fonte_normal.render(f"Pontuacao final: {pontos}", True, COR_TEXTO)
+    tela.blit(resumo, resumo.get_rect(center=(LARGURA_TELA // 2, 310)))
+
+    instrucao = fonte_normal.render("Pressione R para jogar novamente", True, COR_TEXTO)
+    tela.blit(instrucao, instrucao.get_rect(center=(LARGURA_TELA // 2, 355)))
+
+
+def novo_jogo():
+    """Cria os valores iniciais de uma nova rodada."""
+    agora = pygame.time.get_ticks()
+    return {
+        "jogador": criar_jogador(),
+        "robos": [],
+        "tiros": [],
+        "pontos": 0,
+        "vidas": VIDAS_INICIAIS,
+        "inicio": agora,
+        "ultimo_robo": agora,
+        "estado": "jogando",
+    }
 
 
 def executar_jogo():
@@ -231,12 +278,9 @@ def executar_jogo():
     relogio = pygame.time.Clock()
     fonte = pygame.font.Font(None, 18)
     fonte_interface = pygame.font.Font(None, 28)
-    jogador = criar_jogador()
-    robos = []
-    tiros = []
-    pontos = 0
-    vidas = VIDAS_INICIAIS
-    ultimo_robo = pygame.time.get_ticks()
+    fonte_grande = pygame.font.Font(None, 58)
+    recorde = carregar_recorde(CAMINHO_RECORDE)
+    partida = novo_jogo()
     rodando = True
 
     while rodando:
@@ -247,32 +291,75 @@ def executar_jogo():
                 rodando = False
             elif evento.type == pygame.KEYDOWN and evento.key == pygame.K_ESCAPE:
                 rodando = False
-            elif evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
-                tiro = criar_tiro(jogador, evento.pos)
+            elif (
+                partida["estado"] == "jogando"
+                and evento.type == pygame.MOUSEBUTTONDOWN
+                and evento.button == 1
+            ):
+                tiro = criar_tiro(partida["jogador"], evento.pos)
                 if tiro is not None:
-                    tiros.append(tiro)
-
-        teclas = pygame.key.get_pressed()
-        movimentar_jogador(jogador, teclas, delta)
+                    partida["tiros"].append(tiro)
+            elif (
+                partida["estado"] != "jogando"
+                and evento.type == pygame.KEYDOWN
+                and evento.key == pygame.K_r
+            ):
+                partida = novo_jogo()
 
         agora = pygame.time.get_ticks()
-        if agora - ultimo_robo >= INTERVALO_ROBOS:
-            robos.append(criar_robo())
-            ultimo_robo = agora
+        restante = tempo_restante(partida["inicio"], agora, DURACAO_PARTIDA)
 
-        movimentar_robos(robos, jogador, delta)
-        movimentar_tiros(tiros, delta)
-        pontos = verificar_acertos(tiros, robos, pontos)
-        vidas = verificar_dano(jogador, robos, vidas)
+        if partida["estado"] == "jogando":
+            teclas = pygame.key.get_pressed()
+            movimentar_jogador(partida["jogador"], teclas, delta)
 
-        if jogador_perdeu(vidas):
-            rodando = False
+            if agora - partida["ultimo_robo"] >= INTERVALO_ROBOS:
+                partida["robos"].append(criar_robo())
+                partida["ultimo_robo"] = agora
+
+            movimentar_robos(partida["robos"], partida["jogador"], delta)
+            movimentar_tiros(partida["tiros"], delta)
+            partida["pontos"] = verificar_acertos(
+                partida["tiros"],
+                partida["robos"],
+                partida["pontos"],
+            )
+            partida["vidas"] = verificar_dano(
+                partida["jogador"],
+                partida["robos"],
+                partida["vidas"],
+            )
+
+            if jogador_perdeu(partida["vidas"]):
+                partida["estado"] = "derrota"
+            elif restante <= 0:
+                partida["estado"] = "vitoria"
+
+            if partida["pontos"] > recorde:
+                recorde = partida["pontos"]
+                salvar_recorde(CAMINHO_RECORDE, recorde)
 
         desenhar_cenario(tela)
-        desenhar_robos(tela, robos, fonte)
-        desenhar_tiros(tela, tiros)
-        desenhar_jogador(tela, jogador)
-        desenhar_interface(tela, fonte_interface, pontos, vidas)
+        desenhar_robos(tela, partida["robos"], fonte)
+        desenhar_tiros(tela, partida["tiros"])
+        desenhar_jogador(tela, partida["jogador"])
+        desenhar_interface(
+            tela,
+            fonte_interface,
+            partida["pontos"],
+            partida["vidas"],
+            restante,
+            recorde,
+        )
+
+        if partida["estado"] != "jogando":
+            desenhar_fim(
+                tela,
+                fonte_grande,
+                fonte_interface,
+                partida["estado"],
+                partida["pontos"],
+            )
         pygame.display.flip()
 
     pygame.quit()
