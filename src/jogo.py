@@ -1,17 +1,26 @@
+import random
+
 import pygame
 
 from src.config import (
     ALTURA_TELA,
+    CHANCE_ACERTO_IA,
+    COR_ALERTA,
     COR_FUNDO,
     COR_GRADE,
+    COR_HOSTIL,
+    COR_INOCENTE,
     COR_JOGADOR,
+    COR_TEXTO,
     FPS,
+    INTERVALO_ROBOS,
     LARGURA_TELA,
     TAMANHO_JOGADOR,
+    TAMANHO_ROBO,
     TITULO_JOGO,
     VELOCIDADE_JOGADOR,
 )
-from src.funcoes import limitar_valor
+from src.funcoes import classificar_robo, limitar_valor
 
 
 def criar_jogador():
@@ -43,6 +52,62 @@ def movimentar_jogador(jogador, teclas, delta):
     jogador.y = limitar_valor(jogador.y, 0, ALTURA_TELA - jogador.height)
 
 
+def criar_robo():
+    """Cria um robô em uma das bordas da fábrica."""
+    lado = random.choice(("cima", "baixo", "esquerda", "direita"))
+
+    if lado == "cima":
+        x = random.randint(0, LARGURA_TELA - TAMANHO_ROBO)
+        y = 0
+    elif lado == "baixo":
+        x = random.randint(0, LARGURA_TELA - TAMANHO_ROBO)
+        y = ALTURA_TELA - TAMANHO_ROBO
+    elif lado == "esquerda":
+        x = 0
+        y = random.randint(0, ALTURA_TELA - TAMANHO_ROBO)
+    else:
+        x = LARGURA_TELA - TAMANHO_ROBO
+        y = random.randint(0, ALTURA_TELA - TAMANHO_ROBO)
+
+    tipo = random.choice(("hostil", "hostil", "inocente"))
+    direcao = pygame.Vector2(random.uniform(-1, 1), random.uniform(-1, 1))
+    if direcao.length_squared() == 0:
+        direcao.x = 1
+
+    return {
+        "rect": pygame.Rect(x, y, TAMANHO_ROBO, TAMANHO_ROBO),
+        "x": float(x),
+        "y": float(y),
+        "tipo": tipo,
+        "classificacao": classificar_robo(tipo, CHANCE_ACERTO_IA),
+        "velocidade": random.randint(65, 100) if tipo == "hostil" else random.randint(35, 55),
+        "direcao": direcao.normalize(),
+    }
+
+
+def movimentar_robos(robos, jogador, delta):
+    """Hostis perseguem o técnico; inocentes circulam pelo cenário."""
+    for robo in robos:
+        if robo["tipo"] == "hostil":
+            direcao = pygame.Vector2(jogador.center) - pygame.Vector2(robo["rect"].center)
+            if direcao.length_squared() > 0:
+                direcao = direcao.normalize()
+        else:
+            direcao = robo["direcao"]
+
+        robo["x"] += direcao.x * robo["velocidade"] * delta
+        robo["y"] += direcao.y * robo["velocidade"] * delta
+
+        if robo["x"] <= 0 or robo["x"] >= LARGURA_TELA - TAMANHO_ROBO:
+            robo["direcao"].x *= -1
+        if robo["y"] <= 0 or robo["y"] >= ALTURA_TELA - TAMANHO_ROBO:
+            robo["direcao"].y *= -1
+
+        robo["x"] = limitar_valor(robo["x"], 0, LARGURA_TELA - TAMANHO_ROBO)
+        robo["y"] = limitar_valor(robo["y"], 0, ALTURA_TELA - TAMANHO_ROBO)
+        robo["rect"].topleft = (round(robo["x"]), round(robo["y"]))
+
+
 def desenhar_cenario(tela):
     """Desenha um chão industrial provisório para a fábrica."""
     tela.fill(COR_FUNDO)
@@ -60,6 +125,24 @@ def desenhar_jogador(tela, jogador):
     pygame.draw.circle(tela, (245, 245, 245), jogador.center, 5)
 
 
+def desenhar_robos(tela, robos, fonte):
+    """Desenha o tipo real por cor e o palpite informado pela IA."""
+    for robo in robos:
+        cor = COR_HOSTIL if robo["tipo"] == "hostil" else COR_INOCENTE
+        pygame.draw.rect(tela, cor, robo["rect"], border_radius=5)
+
+        if robo["classificacao"] == "hostil":
+            texto = "IA: AMEACA"
+            cor_texto = COR_ALERTA
+        else:
+            texto = "IA: SEGURO"
+            cor_texto = COR_TEXTO
+
+        imagem = fonte.render(texto, True, cor_texto)
+        posicao = imagem.get_rect(center=(robo["rect"].centerx, robo["rect"].top - 9))
+        tela.blit(imagem, posicao)
+
+
 def executar_jogo():
     """Cria a janela e mantém o loop principal do Pygame em execução."""
     pygame.init()
@@ -67,7 +150,10 @@ def executar_jogo():
     tela = pygame.display.set_mode((LARGURA_TELA, ALTURA_TELA))
     pygame.display.set_caption(TITULO_JOGO)
     relogio = pygame.time.Clock()
+    fonte = pygame.font.Font(None, 18)
     jogador = criar_jogador()
+    robos = []
+    ultimo_robo = pygame.time.get_ticks()
     rodando = True
 
     while rodando:
@@ -82,7 +168,15 @@ def executar_jogo():
         teclas = pygame.key.get_pressed()
         movimentar_jogador(jogador, teclas, delta)
 
+        agora = pygame.time.get_ticks()
+        if agora - ultimo_robo >= INTERVALO_ROBOS:
+            robos.append(criar_robo())
+            ultimo_robo = agora
+
+        movimentar_robos(robos, jogador, delta)
+
         desenhar_cenario(tela)
+        desenhar_robos(tela, robos, fonte)
         desenhar_jogador(tela, jogador)
         pygame.display.flip()
 
